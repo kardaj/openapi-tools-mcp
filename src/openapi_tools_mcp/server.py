@@ -47,11 +47,18 @@ def spec_list(
 
 
 @mcp.tool()
-def spec_get(section: str, name: str, spec_path: str) -> Any:
-    """Fetch `name` from a section (paths, schemas, parameters, responses, requestBodies, headers, securitySchemes, links, callbacks, examples) of the spec at `spec_path`; returns the value plus optional `line_start`/`line_end` (0-based) from the source file."""
+def spec_get(
+    section: str,
+    name: str,
+    spec_path: str,
+    resolve_refs: bool = True,
+) -> Any:
+    """Fetch `name` from a section (paths, schemas, parameters, responses, requestBodies, headers, securitySchemes, links, callbacks, examples) of the spec at `spec_path`; returns the value plus optional `line_start`/`line_end` (0-based) from the source file. Set `resolve_refs` to False to keep $ref values in responses."""
     path = _resolve_spec_path(spec_path)
     loaded = load_spec(path)
-    return spec_get_impl(loaded["spec"], section, name, spec_path=path)
+    return spec_get_impl(
+        loaded["spec"], section, name, spec_path=path, resolve_refs=resolve_refs
+    )
 
 
 def main() -> None:

@@ -173,6 +173,21 @@ def _resolve_ref_chain(
     return resolved
 
 
+def _resolve_all_refs(
+    spec: Dict[str, Any], value: Any, seen: set[str] | None = None
+) -> Any:
+    """Recursively resolve all $ref pointers within `value`."""
+    if isinstance(value, dict):
+        if "$ref" in value and isinstance(value["$ref"], str):
+            resolved = _resolve_ref_chain(spec, value["$ref"], seen)
+            # Recurse again in case the resolved object contains further $ref values.
+            return _resolve_all_refs(spec, deepcopy(resolved), seen)
+        return {key: _resolve_all_refs(spec, item, seen) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_all_refs(spec, item, seen) for item in value]
+    return value
+
+
 def _resolve_response_value(spec: Dict[str, Any], response: Any) -> Any:
     if (
         isinstance(response, dict)
@@ -256,68 +271,96 @@ def _find_line_span(spec_path: Path, keys: List[str]) -> Tuple[int | None, int |
 
 
 def spec_get(
-    spec: Dict[str, Any], section: str, name: str, *, spec_path: Path | None = None
+    spec: Dict[str, Any],
+    section: str,
+    name: str,
+    *,
+    spec_path: Path | None = None,
+    resolve_refs: bool = True,
 ) -> Dict[str, Any]:
-    """Get a specific item from supported sections, with optional line span."""
+    """Get a specific item from supported sections, with optional line span.
+
+    When `resolve_refs` is True, response objects have their $ref pointers resolved.
+    """
     if section == "paths":
         paths = spec.get("paths", {}) or {}
         if name not in paths:
             raise KeyError(f"Path '{name}' not found")
-        value = _resolve_path_responses(spec, paths[name])
+        value = deepcopy(paths[name])
+        if resolve_refs:
+            value = _resolve_all_refs(spec, value)
 
     elif section == "schemas":
         schemas = spec.get("components", {}).get("schemas", {}) or {}
         if name not in schemas:
             raise KeyError(f"Schema '{name}' not found")
-        value = schemas[name]
+        value = deepcopy(schemas[name])
+        if resolve_refs:
+            value = _resolve_all_refs(spec, value)
 
     elif section == "parameters":
         params = spec.get("components", {}).get("parameters", {}) or {}
         if name not in params:
             raise KeyError(f"Parameter '{name}' not found")
-        value = params[name]
+        value = deepcopy(params[name])
+        if resolve_refs:
+            value = _resolve_all_refs(spec, value)
 
     elif section == "responses":
         responses = spec.get("components", {}).get("responses", {}) or {}
         if name not in responses:
             raise KeyError(f"Response '{name}' not found")
-        value = _resolve_response_value(spec, responses[name])
+        value = deepcopy(responses[name])
+        if resolve_refs:
+            value = _resolve_all_refs(spec, value)
 
     elif section == "requestBodies":
         bodies = spec.get("components", {}).get("requestBodies", {}) or {}
         if name not in bodies:
             raise KeyError(f"Request body '{name}' not found")
-        value = bodies[name]
+        value = deepcopy(bodies[name])
+        if resolve_refs:
+            value = _resolve_all_refs(spec, value)
 
     elif section == "headers":
         headers = spec.get("components", {}).get("headers", {}) or {}
         if name not in headers:
             raise KeyError(f"Header '{name}' not found")
-        value = headers[name]
+        value = deepcopy(headers[name])
+        if resolve_refs:
+            value = _resolve_all_refs(spec, value)
 
     elif section == "securitySchemes":
         schemes = spec.get("components", {}).get("securitySchemes", {}) or {}
         if name not in schemes:
             raise KeyError(f"Security scheme '{name}' not found")
-        value = schemes[name]
+        value = deepcopy(schemes[name])
+        if resolve_refs:
+            value = _resolve_all_refs(spec, value)
 
     elif section == "links":
         links = spec.get("components", {}).get("links", {}) or {}
         if name not in links:
             raise KeyError(f"Link '{name}' not found")
-        value = links[name]
+        value = deepcopy(links[name])
+        if resolve_refs:
+            value = _resolve_all_refs(spec, value)
 
     elif section == "callbacks":
         callbacks = spec.get("components", {}).get("callbacks", {}) or {}
         if name not in callbacks:
             raise KeyError(f"Callback '{name}' not found")
-        value = callbacks[name]
+        value = deepcopy(callbacks[name])
+        if resolve_refs:
+            value = _resolve_all_refs(spec, value)
 
     elif section == "examples":
         examples = spec.get("components", {}).get("examples", {}) or {}
         if name not in examples:
             raise KeyError(f"Example '{name}' not found")
-        value = examples[name]
+        value = deepcopy(examples[name])
+        if resolve_refs:
+            value = _resolve_all_refs(spec, value)
 
     else:
         raise ValueError(

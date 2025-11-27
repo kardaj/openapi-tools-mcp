@@ -888,6 +888,27 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+  parameters:
+    TraceId:
+      name: trace-id
+      in: header
+      description: tracing identifier
+      required: false
+      schema:
+        type: string
+    TraceIdAlias:
+      $ref: "#/components/parameters/TraceId"
+    TraceIdAliasDeep:
+      $ref: "#/components/parameters/TraceIdAlias"
+  headers:
+    Rate-Limit-Limit:
+      description: The number of allowed requests in the current period
+      schema:
+        type: integer
+    Rate-Limit-Limit-Alias:
+      $ref: "#/components/headers/Rate-Limit-Limit"
+    Rate-Limit-Limit-Deep:
+      $ref: "#/components/headers/Rate-Limit-Limit-Alias"
   requestBodies:
     Pet:
       description: Pet object that needs to be added to the store
@@ -919,3 +940,35 @@ components:
       type: apiKey
       name: api_key
       in: header
+    petstore_auth_alias:
+      $ref: "#/components/securitySchemes/petstore_auth"
+    petstore_auth_alias_deep:
+      $ref: "#/components/securitySchemes/petstore_auth_alias"
+  links:
+    FindOrderByIdLink:
+      operationId: getOrderById
+    FindOrderByIdLinkAlias:
+      $ref: "#/components/links/FindOrderByIdLink"
+    FindOrderByIdLinkDeep:
+      $ref: "#/components/links/FindOrderByIdLinkAlias"
+  callbacks:
+    NewPetCallback:
+      '{$request.body#/url}':
+        post:
+          responses:
+            "200":
+              description: callback response
+    NewPetCallbackAlias:
+      $ref: "#/components/callbacks/NewPetCallback"
+    NewPetCallbackDeep:
+      $ref: "#/components/callbacks/NewPetCallbackAlias"
+  examples:
+    PetExample:
+      summary: A pet example
+      value:
+        name: doggie
+        status: available
+    PetExampleAlias:
+      $ref: "#/components/examples/PetExample"
+    PetExampleAliasDeep:
+      $ref: "#/components/examples/PetExampleAlias"
