@@ -1,7 +1,7 @@
 """MCP server exposing utilities for inspecting local OpenAPI specs."""
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 from fastmcp import FastMCP
 
@@ -29,11 +29,21 @@ def spec_info(spec_path: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def spec_list(section: str, spec_path: str) -> Any:
-    """List names in a section of the spec at `spec_path`; supports paths, schemas, parameters, responses, requestBodies, headers, securitySchemes, links, callbacks, examples."""
+def spec_list(
+    section: str,
+    spec_path: str,
+    filter_by_glob: str | None = None,
+    filter_by_tag: str | Iterable[str] | None = None,
+) -> Any:
+    """List names in a section of the spec at `spec_path`; supports paths, schemas, parameters, responses, tags, requestBodies, headers, securitySchemes, links, callbacks, examples."""
     path = _resolve_spec_path(spec_path)
     loaded = load_spec(path)
-    return spec_list_impl(loaded["spec"], section)
+    return spec_list_impl(
+        loaded["spec"],
+        section,
+        filter_by_glob=filter_by_glob,
+        filter_by_tag=filter_by_tag,
+    )
 
 
 @mcp.tool()

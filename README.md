@@ -7,7 +7,7 @@ A minimal [Model Context Protocol](https://spec.modelcontextprotocol.io/) server
 Install directly from the repository and launch the server via the published console script:
 
 ```bash
-uvx --from git+https://github.com/your-org/openapi-tools-mcp openapi-tools-mcp
+uvx --from git+https://github.com/kardaj/openapi-tools-mcp openapi-tools-mcp
 ```
 
 Replace the repository URL with the actual location of this repo. `uvx` will resolve the `openapi-tools-mcp` entrypoint defined in `pyproject.toml` and start the MCP server.

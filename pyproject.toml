@@ -18,6 +18,16 @@ dependencies = [
   "PyYAML>=6.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "black",
+  "ruff",
+  "pytest",
+  "pytest-cov",
+  "pytest-black",
+  "pytest-ruff",
+]
+
 [project.urls]
 Homepage = "https://github.com/your-org/openapi-tools-mcp"
 
@@ -29,3 +39,7 @@ packages = ["src/openapi_tools_mcp"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "README.md"]
+
+[tool.pytest.ini_options]
+addopts = "--black --ruff --cov=src --cov-report=term-missing"
+testpaths = ["tests"]

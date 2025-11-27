@@ -1,7 +1,9 @@
 """OpenAPI helper functions for validation and inspection."""
 
+from copy import deepcopy
+from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 from openapi_spec_validator import validate_spec
 from openapi_spec_validator.readers import read_from_filename
@@ -27,55 +29,181 @@ def spec_info(spec: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def spec_list(spec: Dict[str, Any], section: str) -> List[Any]:
+def _normalize_tag_filter(filter_by_tag: str | Iterable[str] | None) -> set[str]:
+    if filter_by_tag is None:
+        return set()
+    if isinstance(filter_by_tag, str):
+        return {filter_by_tag}
+    return {tag for tag in filter_by_tag if tag}
+
+
+def _matches_glob(name: str, pattern: str | None) -> bool:
+    if not pattern:
+        return True
+    return fnmatch(name, pattern)
+
+
+def _schema_has_tag(schema: Dict[str, Any], tag_filter: set[str]) -> bool:
+    if not tag_filter:
+        return True
+    tags = schema.get("tags") or schema.get("x-tags") or []
+    return bool(set(tags) & tag_filter)
+
+
+def _path_has_tag(path_item: Dict[str, Any], tag_filter: set[str]) -> bool:
+    if not tag_filter:
+        return True
+    for operation in path_item.values():
+        if not isinstance(operation, dict):
+            continue
+        tags = operation.get("tags") or []
+        if set(tags) & tag_filter:
+            return True
+    return False
+
+
+def spec_list(
+    spec: Dict[str, Any],
+    section: str,
+    *,
+    filter_by_glob: str | None = None,
+    filter_by_tag: str | Iterable[str] | None = None,
+) -> List[Any]:
     """List contents of selected sections."""
+    tag_filter = _normalize_tag_filter(filter_by_tag)
     if section == "paths":
         paths = spec.get("paths", {}) or {}
         return [
-            {"path": path, "verbs": list(verbs.keys())} for path, verbs in paths.items()
+            {"path": path, "verbs": list(verbs.keys())}
+            for path, verbs in paths.items()
+            if _matches_glob(path, filter_by_glob) and _path_has_tag(verbs, tag_filter)
         ]
+
+    if section == "tags":
+        tags: set[str] = set()
+        for path_item in (spec.get("paths", {}) or {}).values():
+            if not isinstance(path_item, dict):
+                continue
+            for operation in path_item.values():
+                if not isinstance(operation, dict):
+                    continue
+                for tag in operation.get("tags") or []:
+                    if isinstance(tag, str):
+                        tags.add(tag)
+        return [name for name in sorted(tags) if _matches_glob(name, filter_by_glob)]
 
     if section == "schemas":
         schemas = spec.get("components", {}).get("schemas", {}) or {}
-        return list(schemas.keys())
+        return [
+            name
+            for name, schema in schemas.items()
+            if _matches_glob(name, filter_by_glob)
+            and _schema_has_tag(schema, tag_filter)
+        ]
 
     if section == "parameters":
         params = spec.get("components", {}).get("parameters", {}) or {}
-        return list(params.keys())
+        return [name for name in params.keys() if _matches_glob(name, filter_by_glob)]
 
     if section == "responses":
         responses = spec.get("components", {}).get("responses", {}) or {}
-        return list(responses.keys())
+        return [
+            name for name in responses.keys() if _matches_glob(name, filter_by_glob)
+        ]
 
     if section == "requestBodies":
         bodies = spec.get("components", {}).get("requestBodies", {}) or {}
-        return list(bodies.keys())
+        return [name for name in bodies.keys() if _matches_glob(name, filter_by_glob)]
 
     if section == "headers":
         headers = spec.get("components", {}).get("headers", {}) or {}
-        return list(headers.keys())
+        return [name for name in headers.keys() if _matches_glob(name, filter_by_glob)]
 
     if section == "securitySchemes":
         schemes = spec.get("components", {}).get("securitySchemes", {}) or {}
-        return list(schemes.keys())
+        return [name for name in schemes.keys() if _matches_glob(name, filter_by_glob)]
 
     if section == "links":
         links = spec.get("components", {}).get("links", {}) or {}
-        return list(links.keys())
+        return [name for name in links.keys() if _matches_glob(name, filter_by_glob)]
 
     if section == "callbacks":
         callbacks = spec.get("components", {}).get("callbacks", {}) or {}
-        return list(callbacks.keys())
+        return [
+            name for name in callbacks.keys() if _matches_glob(name, filter_by_glob)
+        ]
 
     if section == "examples":
         examples = spec.get("components", {}).get("examples", {}) or {}
-        return list(examples.keys())
+        return [name for name in examples.keys() if _matches_glob(name, filter_by_glob)]
 
     raise ValueError(
         "Unsupported section "
-        f"'{section}'. Expected one of: paths, schemas, parameters, responses, "
+        f"'{section}'. Expected one of: paths, schemas, parameters, responses, tags, "
         "requestBodies, headers, securitySchemes, links, callbacks, examples."
     )
+
+
+def _resolve_ref(spec: Dict[str, Any], ref: str) -> Any:
+    if not ref.startswith("#/"):
+        raise ValueError(f"Only local $ref values are supported, got '{ref}'.")
+
+    target: Any = spec
+    for part in ref.lstrip("#/").split("/"):
+        if not isinstance(target, dict) or part not in target:
+            raise KeyError(f"Unable to resolve $ref path part '{part}' in '{ref}'.")
+        target = target[part]
+    return target
+
+
+def _resolve_ref_chain(
+    spec: Dict[str, Any], ref: str, seen: set[str] | None = None
+) -> Any:
+    seen = seen or set()
+    if ref in seen:
+        raise ValueError(f"Circular $ref detected for '{ref}'.")
+    seen.add(ref)
+
+    resolved = _resolve_ref(spec, ref)
+    if isinstance(resolved, dict) and "$ref" in resolved:
+        nested_ref = resolved["$ref"]
+        if not isinstance(nested_ref, str):
+            return resolved
+        return _resolve_ref_chain(spec, nested_ref, seen)
+    return resolved
+
+
+def _resolve_response_value(spec: Dict[str, Any], response: Any) -> Any:
+    if (
+        isinstance(response, dict)
+        and "$ref" in response
+        and isinstance(response["$ref"], str)
+    ):
+        resolved = _resolve_ref_chain(spec, response["$ref"])
+        return deepcopy(resolved)
+    return response
+
+
+def _resolve_response_refs(
+    spec: Dict[str, Any], responses: Dict[str, Any]
+) -> Dict[str, Any]:
+    resolved: Dict[str, Any] = {}
+    for status, response in responses.items():
+        resolved[status] = _resolve_response_value(spec, response)
+    return resolved
+
+
+def _resolve_path_responses(
+    spec: Dict[str, Any], path_item: Dict[str, Any]
+) -> Dict[str, Any]:
+    resolved_path = deepcopy(path_item)
+    for _, operation in resolved_path.items():
+        if not isinstance(operation, dict):
+            continue
+        responses = operation.get("responses")
+        if isinstance(responses, dict):
+            operation["responses"] = _resolve_response_refs(spec, responses)
+    return resolved_path
 
 
 def _section_keys(section: str, name: str) -> List[str]:
@@ -135,7 +263,7 @@ def spec_get(
         paths = spec.get("paths", {}) or {}
         if name not in paths:
             raise KeyError(f"Path '{name}' not found")
-        value = paths[name]
+        value = _resolve_path_responses(spec, paths[name])
 
     elif section == "schemas":
         schemas = spec.get("components", {}).get("schemas", {}) or {}
@@ -153,7 +281,7 @@ def spec_get(
         responses = spec.get("components", {}).get("responses", {}) or {}
         if name not in responses:
             raise KeyError(f"Response '{name}' not found")
-        value = responses[name]
+        value = _resolve_response_value(spec, responses[name])
 
     elif section == "requestBodies":
         bodies = spec.get("components", {}).get("requestBodies", {}) or {}

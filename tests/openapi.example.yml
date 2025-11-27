@@ -73,11 +73,7 @@ paths:
         "422":
           description: Validation exception
         default:
-          description: Unexpected error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/GenericError"
       security:
         - petstore_auth:
             - write:pets
@@ -509,6 +505,7 @@ paths:
     post:
       tags:
         - user
+        - beta
       summary: Create user.
       description: This can only be done by the logged in user.
       operationId: createUser
@@ -738,6 +735,8 @@ components:
   schemas:
     Order:
       type: object
+      tags:
+        - store
       properties:
         id:
           type: integer
@@ -858,6 +857,8 @@ components:
             - sold
       xml:
         name: pet
+      tags:
+        - pet
     ApiResponse:
       type: object
       properties:
@@ -880,6 +881,13 @@ components:
       required:
         - code
         - message
+  responses:
+    GenericError:
+      description: Pet not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
   requestBodies:
     Pet:
       description: Pet object that needs to be added to the store
