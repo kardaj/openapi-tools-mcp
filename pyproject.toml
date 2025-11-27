@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openapi-tools-mcp"
+version = "0.1.0"
+description = "A minimal MCP server implemented with fastMCP."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Your Name", email = "you@example.com" }
+]
+dependencies = [
+  "fastmcp>=0.2.0",
+  "openapi-spec-validator>=0.7.1",
+  "PyYAML>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/openapi-tools-mcp"
+
+[project.scripts]
+openapi-tools-mcp = "openapi_tools_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openapi_tools_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "README.md"]
