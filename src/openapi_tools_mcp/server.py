@@ -22,7 +22,7 @@ def _resolve_spec_path(spec_path: str) -> Path:
 
 @mcp.tool()
 def spec_info(spec_path: str) -> Dict[str, Any]:
-    """Inspect spec metadata at `spec_path` (YAML/JSON); returns openapi version, `info`, and `servers`."""
+    """Quickly summarize a spec file (OpenAPI version, title/description, servers). Use this first to confirm you're reading the right spec and its base URLs."""
     path = _resolve_spec_path(spec_path)
     loaded = load_spec(path)
     return spec_info_impl(loaded["spec"])
@@ -35,7 +35,7 @@ def spec_list(
     filter_by_glob: str | None = None,
     filter_by_tag: str | Iterable[str] | None = None,
 ) -> Any:
-    """List names in a section of the spec at `spec_path`; supports paths, schemas, parameters, responses, tags, requestBodies, headers, securitySchemes, links, callbacks, examples."""
+    """Enumerate keys within a spec section (e.g., all paths, schemas, or responses). Use to discover what exists before drilling into details."""
     path = _resolve_spec_path(spec_path)
     loaded = load_spec(path)
     return spec_list_impl(
@@ -53,7 +53,7 @@ def spec_get(
     spec_path: str,
     resolve_refs: bool = True,
 ) -> Any:
-    """Fetch `name` from a section (paths, schemas, parameters, responses, requestBodies, headers, securitySchemes, links, callbacks, examples) of the spec at `spec_path`; returns the value plus optional `line_start`/`line_end` (0-based) from the source file. Set `resolve_refs` to False to keep $ref values in responses."""
+    """Retrieve a specific item from a section (e.g., one path or schema), with optional $ref resolution and source line numbers for precise navigation."""
     path = _resolve_spec_path(spec_path)
     loaded = load_spec(path)
     return spec_get_impl(
