@@ -1,6 +1,6 @@
 # OpenAPI Tools MCP Server
 
-An [Model Context Protocol](https://spec.modelcontextprotocol.io/) server powered by [fastMCP](https://pypi.org/project/fastmcp/) for inspecting local OpenAPI specs. It exposes tools for listing and retrieving spec details with optional glob/tag filters and `$ref` resolution.
+A [Model Context Protocol](https://spec.modelcontextprotocol.io/) server powered by [fastMCP](https://pypi.org/project/fastmcp/) for inspecting local OpenAPI specs. It exposes tools for listing and retrieving spec details with optional glob/tag filters and `$ref` resolution.
 
 ## Add as an MCP server
 
@@ -39,3 +39,7 @@ source .venv/bin/activate
 uv pip install -e .
 openapi-tools-mcp
 ```
+
+## License
+
+MIT
