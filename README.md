@@ -4,7 +4,7 @@ A [Model Context Protocol](https://spec.modelcontextprotocol.io/) server powered
 
 ## Add as an MCP server
 
-Add this server to your MCP client configuration:
+Add this server to your MCP client configuration (PyPI):
 
 ```json
 {
@@ -13,7 +13,7 @@ Add this server to your MCP client configuration:
       "command": "uvx",
       "args": [
         "--from",
-        "git+ssh://git@github.com/kardaj/openapi-tools-mcp.git",
+        "openapi-tools-mcp",
         "openapi-tools-mcp"
       ]
     }
@@ -21,14 +21,20 @@ Add this server to your MCP client configuration:
 }
 ```
 
-This launches the `openapi-tools-mcp` entrypoint directly from the repository via `uvx`.
+This launches the `openapi-tools-mcp` entrypoint from PyPI via `uvx`.
 
-TOML version:
+TOML version (PyPI):
 
 ```toml
 [mcp_servers.openapi-tools]
 command = "uvx"
-args = ["--from", "git+ssh://git@github.com/kardaj/openapi-tools-mcp.git", "openapi-tools-mcp"]
+args = ["--from", "openapi-tools-mcp", "openapi-tools-mcp"]
+```
+
+You can also install directly from GitHub with `uvx`:
+
+```bash
+uvx --from git+ssh://git@github.com/kardaj/openapi-tools-mcp.git openapi-tools-mcp
 ```
 
 ## Available tools
@@ -38,15 +44,6 @@ args = ["--from", "git+ssh://git@github.com/kardaj/openapi-tools-mcp.git", "open
 - `spec_get(section, name, spec_path, resolve_refs=True)`: Retrieve a specific item from a section (e.g., one path or schema), with optional `$ref` resolution and source line numbers for precise navigation.
 
 All tools expect a readable OpenAPI YAML/JSON file path on the local filesystem. An example spec lives at `tests/openapi.example.yml`.
-
-## Local development
-
-```bash
-uv venv
-source .venv/bin/activate
-uv pip install -e .
-openapi-tools-mcp
-```
 
 ## License
 
