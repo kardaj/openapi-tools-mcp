@@ -12,8 +12,16 @@ from .tools import (
     spec_list as spec_list_impl,
 )
 
-
-mcp = FastMCP("openapi-tools")
+mcp = FastMCP(
+    name="openapi-tools",
+    instructions=(
+        "Use this server when you need to read openapi*.yml/openapi*.yaml (or "
+        "OpenAPI JSON) files and extract paths/tags/components without loading the "
+        "whole spec. List first, then fetch one item; resolve local-only #/... $ref; "
+        "return YAML line ranges. Read local files only; do not call APIs."
+    ),
+    website_url="https://github.com/kardaj/openapi-tools-mcp",
+)
 
 
 def _resolve_spec_path(spec_path: str) -> Path:

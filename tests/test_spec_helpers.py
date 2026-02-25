@@ -11,7 +11,6 @@ from openapi_tools_mcp.tools import (
     validate_example_spec,
 )
 
-
 FIXTURE_PATH = Path(__file__).parent / "openapi.example.yml"
 
 

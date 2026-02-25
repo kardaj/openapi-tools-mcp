@@ -2,6 +2,8 @@
 
 A [Model Context Protocol](https://spec.modelcontextprotocol.io/) server powered by [fastMCP](https://pypi.org/project/fastmcp/) for inspecting local OpenAPI specs. It exposes tools for listing and retrieving spec details with optional glob/tag filters and `$ref` resolution.
 
+The server also publishes MCP metadata (`instructions` and `website_url`) to guide clients toward local-file OpenAPI inspection workflows.
+
 ## Add as an MCP server
 
 Add this server to your MCP client configuration (PyPI):

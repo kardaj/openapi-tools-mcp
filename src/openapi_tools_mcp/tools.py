@@ -9,7 +9,6 @@ from openapi_spec_validator import validate_spec
 from openapi_spec_validator.readers import read_from_filename
 import yaml
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SPEC_PATH = PROJECT_ROOT / "tests" / "openapi.example.yml"
 
