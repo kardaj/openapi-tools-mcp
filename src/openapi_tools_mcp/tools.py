@@ -11,6 +11,9 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SPEC_PATH = PROJECT_ROOT / "tests" / "openapi.example.yml"
+HTTP_METHODS = frozenset(
+    {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
+)
 
 
 def load_spec(path: Path) -> Dict[str, Any]:
@@ -61,6 +64,16 @@ def _path_has_tag(path_item: Dict[str, Any], tag_filter: set[str]) -> bool:
     return False
 
 
+def _path_operation_names(path_item: Any) -> List[str]:
+    if not isinstance(path_item, dict):
+        return []
+    return [
+        name
+        for name, operation in path_item.items()
+        if name in HTTP_METHODS and isinstance(operation, dict)
+    ]
+
+
 def spec_list(
     spec: Dict[str, Any],
     section: str,
@@ -73,9 +86,11 @@ def spec_list(
     if section == "paths":
         paths = spec.get("paths", {}) or {}
         return [
-            {"path": path, "verbs": list(verbs.keys())}
-            for path, verbs in paths.items()
-            if _matches_glob(path, filter_by_glob) and _path_has_tag(verbs, tag_filter)
+            {"path": path, "verbs": _path_operation_names(path_item)}
+            for path, path_item in paths.items()
+            if isinstance(path_item, dict)
+            and _matches_glob(path, filter_by_glob)
+            and _path_has_tag(path_item, tag_filter)
         ]
 
     if section == "tags":

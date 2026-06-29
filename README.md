@@ -42,7 +42,7 @@ uvx --from git+ssh://git@github.com/kardaj/openapi-tools-mcp.git openapi-tools-m
 ## Available tools
 
 - `spec_info(spec_path)`: Quickly summarize a spec file (OpenAPI version, title/description, servers). Use this first to confirm you're reading the right spec and its base URLs.
-- `spec_list(section, spec_path, filter_by_glob?, filter_by_tag?)`: Enumerate keys within a spec section (e.g., all paths, schemas, or responses). Use to discover what exists before drilling into details.
+- `spec_list(section, spec_path, filter_by_glob?, filter_by_tag?)`: Enumerate keys within a spec section (e.g., all paths, schemas, or responses). Path listings include HTTP operation methods only, not path metadata fields. Use to discover what exists before drilling into details.
 - `spec_get(section, name, spec_path, resolve_refs=True)`: Retrieve a specific item from a section (e.g., one path or schema), with optional `$ref` resolution and source line numbers for precise navigation.
 
 All tools expect a readable OpenAPI YAML/JSON file path on the local filesystem. An example spec lives at `tests/openapi.example.yml`.

@@ -207,23 +207,20 @@ class SpecListFilteringTests(unittest.TestCase):
             }
         }
         store_paths = spec_list(spec, "paths", filter_by_tag=["", "store"])
-        self.assertEqual(
-            store_paths, [{"path": "/widgets", "verbs": ["get", "summary"]}]
-        )
+        self.assertEqual(store_paths, [{"path": "/widgets", "verbs": ["get"]}])
 
     def test_filter_paths_skips_non_dict_operations_first(self):
         spec = {
             "paths": {
                 "/widgets": {
                     "summary": "not an operation",
+                    "parameters": [{"name": "trace-id", "in": "header"}],
                     "get": {"tags": ["store"], "responses": {}},
                 }
             }
         }
         store_paths = spec_list(spec, "paths", filter_by_tag="store")
-        self.assertEqual(
-            store_paths, [{"path": "/widgets", "verbs": ["summary", "get"]}]
-        )
+        self.assertEqual(store_paths, [{"path": "/widgets", "verbs": ["get"]}])
 
     def test_filter_by_glob_empty_pattern(self):
         tags = spec_list(self.spec, "tags", filter_by_glob="")
