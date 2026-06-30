@@ -32,7 +32,7 @@ classifiers = [
 dev = [
   "black",
   "ruff",
-  "pytest",
+  "pytest<9",
   "pytest-cov",
   "pytest-black",
   "pytest-ruff",
