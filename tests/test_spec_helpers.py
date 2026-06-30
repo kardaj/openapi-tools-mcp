@@ -12,6 +12,7 @@ from openapi_tools_mcp.tools import (
 )
 
 FIXTURE_PATH = Path(__file__).parent / "openapi.example.yml"
+XQUIK_FIXTURE_PATH = Path(__file__).parent / "xquik.openapi.yml"
 
 
 class SpecGetTests(unittest.TestCase):
@@ -151,6 +152,41 @@ class SpecGetTests(unittest.TestCase):
         self.assertIn("openapi", info)
         self.assertIn("info", info)
         self.assertIn("servers", info)
+
+
+class XquikOpenAPI31FixtureTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        loaded = load_spec(XQUIK_FIXTURE_PATH)
+        cls.spec = loaded["spec"]
+
+    def test_spec_info_lists_public_server(self):
+        info = spec_info(self.spec)
+        self.assertEqual(info["openapi"], "3.1.0")
+        self.assertEqual(info["info"]["title"], "Xquik API")
+        self.assertEqual(info["servers"][0]["url"], "https://xquik.com")
+
+    def test_paths_and_tags_are_discoverable(self):
+        paths = spec_list(self.spec, "paths", filter_by_tag="Tweets")
+        self.assertEqual(paths[0]["path"], "/api/v1/x/tweets/search")
+        self.assertEqual(spec_list(self.spec, "tags"), ["Trends", "Tweets", "Users"])
+
+    def test_get_path_and_security_scheme_details(self):
+        search_path = spec_get(
+            self.spec,
+            "paths",
+            "/api/v1/x/tweets/search",
+            spec_path=XQUIK_FIXTURE_PATH,
+        )
+        self.assertEqual(search_path["value"]["get"]["operationId"], "searchTweets")
+
+        api_key = spec_get(
+            self.spec,
+            "securitySchemes",
+            "apiKey",
+            spec_path=XQUIK_FIXTURE_PATH,
+        )
+        self.assertEqual(api_key["value"]["name"], "x-api-key")
 
 
 class SpecListFilteringTests(unittest.TestCase):
