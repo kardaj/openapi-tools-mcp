@@ -9,5 +9,6 @@ uv.lock
 .*_cache
 dist/
 changes/current/
+changes/
 prompts/
 .agent-flow/
