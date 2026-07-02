@@ -3,8 +3,14 @@ from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from openapi_tools_mcp import server as mcp_server
 from openapi_tools_mcp.tools import (
+    URL_CACHE_TTL_SECONDS,
+    _URL_SPEC_CACHE,
+    _UrlHttpError,
+    _UrlNetworkError,
     load_spec,
+    load_spec_source,
     spec_get,
     spec_info,
     spec_list,
@@ -12,6 +18,34 @@ from openapi_tools_mcp.tools import (
 )
 
 FIXTURE_PATH = Path(__file__).parent / "openapi.example.yml"
+
+
+def _minimal_spec_text(title="Remote"):
+    return f"""openapi: 3.0.0
+info:
+  title: {title}
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      tags:
+        - pet
+      responses:
+        "200":
+          description: OK
+components:
+  schemas:
+    Pet:
+      type: object
+"""
+
+
+def _minimal_json_spec_text(title="Remote JSON"):
+    return (
+        '{"openapi":"3.0.0","info":{"title":"'
+        + title
+        + '","version":"1.0.0"},"paths":{"/pets":{"get":{"responses":{"200":{"description":"OK"}}}}}}'
+    )
 
 
 class SpecGetTests(unittest.TestCase):
@@ -151,6 +185,250 @@ class SpecGetTests(unittest.TestCase):
         self.assertIn("openapi", info)
         self.assertIn("info", info)
         self.assertIn("servers", info)
+
+
+class SpecSourceTests(unittest.TestCase):
+    def setUp(self):
+        _URL_SPEC_CACHE.clear()
+
+    def test_load_spec_source_keeps_local_path_behavior(self):
+        loaded = load_spec_source(str(FIXTURE_PATH))
+        self.assertEqual(
+            loaded["spec"]["info"]["title"], "Swagger Petstore - OpenAPI 3.0"
+        )
+        self.assertEqual(loaded["source_path"], FIXTURE_PATH.resolve())
+
+    def test_load_spec_source_downloads_yaml_url_and_caches(self):
+        source = {
+            "url": "https://example.test/openapi.yaml",
+            "headers": {"Authorization": "Bearer token"},
+        }
+        with patch(
+            "openapi_tools_mcp.tools._fetch_url", return_value=_minimal_spec_text()
+        ) as fetch_stub:
+            first = load_spec_source(source)
+            second = load_spec_source(source)
+
+        self.assertEqual(first["spec"]["info"]["title"], "Remote")
+        self.assertIs(first, second)
+        fetch_stub.assert_called_once_with(
+            "https://example.test/openapi.yaml", {"Authorization": "Bearer token"}
+        )
+
+    def test_load_spec_source_downloads_json_url(self):
+        with patch(
+            "openapi_tools_mcp.tools._fetch_url",
+            return_value=_minimal_json_spec_text(),
+        ):
+            loaded = load_spec_source({"url": "https://example.test/openapi.json"})
+
+        self.assertEqual(loaded["spec"]["info"]["title"], "Remote JSON")
+        self.assertIn("/pets", spec_list(loaded["spec"], "paths")[0]["path"])
+
+    def test_url_cache_key_ignores_header_insertion_order(self):
+        with patch(
+            "openapi_tools_mcp.tools._fetch_url", return_value=_minimal_spec_text()
+        ) as fetch_stub:
+            load_spec_source(
+                {
+                    "url": "https://example.test/openapi.yaml",
+                    "headers": {"Accept": "application/yaml", "Authorization": "token"},
+                }
+            )
+            load_spec_source(
+                {
+                    "url": "https://example.test/openapi.yaml",
+                    "headers": {"Authorization": "token", "Accept": "application/yaml"},
+                }
+            )
+
+        fetch_stub.assert_called_once()
+
+    def test_url_cache_separates_different_headers(self):
+        with patch(
+            "openapi_tools_mcp.tools._fetch_url",
+            side_effect=[_minimal_spec_text("One"), _minimal_spec_text("Two")],
+        ) as fetch_stub:
+            one = load_spec_source(
+                {
+                    "url": "https://example.test/openapi.yaml",
+                    "headers": {"X-Tenant": "1"},
+                }
+            )
+            two = load_spec_source(
+                {
+                    "url": "https://example.test/openapi.yaml",
+                    "headers": {"X-Tenant": "2"},
+                }
+            )
+
+        self.assertEqual(one["spec"]["info"]["title"], "One")
+        self.assertEqual(two["spec"]["info"]["title"], "Two")
+        self.assertEqual(fetch_stub.call_count, 2)
+
+    def test_expired_url_cache_refreshes_successfully(self):
+        with (
+            patch(
+                "openapi_tools_mcp.tools._fetch_url",
+                side_effect=[_minimal_spec_text("Old"), _minimal_spec_text("New")],
+            ),
+            patch(
+                "openapi_tools_mcp.tools._monotonic",
+                side_effect=[0.0, URL_CACHE_TTL_SECONDS + 1.0],
+            ),
+        ):
+            old = load_spec_source({"url": "https://example.test/openapi.yaml"})
+            new = load_spec_source({"url": "https://example.test/openapi.yaml"})
+
+        self.assertEqual(old["spec"]["info"]["title"], "Old")
+        self.assertEqual(new["spec"]["info"]["title"], "New")
+
+    def test_expired_url_cache_uses_stale_on_network_error(self):
+        with (
+            patch(
+                "openapi_tools_mcp.tools._fetch_url",
+                side_effect=[_minimal_spec_text("Old"), _UrlNetworkError("timed out")],
+            ),
+            patch(
+                "openapi_tools_mcp.tools._monotonic",
+                side_effect=[0.0, URL_CACHE_TTL_SECONDS + 1.0],
+            ),
+        ):
+            old = load_spec_source({"url": "https://example.test/openapi.yaml"})
+            stale = load_spec_source({"url": "https://example.test/openapi.yaml"})
+
+        self.assertIs(stale, old)
+        self.assertEqual(stale["spec"]["info"]["title"], "Old")
+
+    def test_expired_url_cache_uses_stale_on_5xx(self):
+        with (
+            patch(
+                "openapi_tools_mcp.tools._fetch_url",
+                side_effect=[
+                    _minimal_spec_text("Old"),
+                    _UrlHttpError(503, "Service Unavailable"),
+                ],
+            ),
+            patch(
+                "openapi_tools_mcp.tools._monotonic",
+                side_effect=[0.0, URL_CACHE_TTL_SECONDS + 1.0],
+            ),
+        ):
+            old = load_spec_source({"url": "https://example.test/openapi.yaml"})
+            stale = load_spec_source({"url": "https://example.test/openapi.yaml"})
+
+        self.assertIs(stale, old)
+        self.assertEqual(stale["spec"]["info"]["title"], "Old")
+
+    def test_expired_url_cache_does_not_use_stale_on_4xx(self):
+        with (
+            patch(
+                "openapi_tools_mcp.tools._fetch_url",
+                side_effect=[
+                    _minimal_spec_text("Old"),
+                    _UrlHttpError(404, "Not Found"),
+                ],
+            ),
+            patch(
+                "openapi_tools_mcp.tools._monotonic",
+                side_effect=[0.0, URL_CACHE_TTL_SECONDS + 1.0],
+            ),
+        ):
+            load_spec_source({"url": "https://example.test/openapi.yaml"})
+            with self.assertRaisesRegex(ValueError, "HTTP 404"):
+                load_spec_source({"url": "https://example.test/openapi.yaml"})
+
+    def test_initial_url_failures_are_not_cached(self):
+        for failure in [
+            _UrlNetworkError("timed out"),
+            _UrlHttpError(404, "Not Found"),
+            _UrlHttpError(503, "Service Unavailable"),
+        ]:
+            with self.subTest(failure=failure):
+                _URL_SPEC_CACHE.clear()
+                with patch("openapi_tools_mcp.tools._fetch_url", side_effect=failure):
+                    with self.assertRaises(ValueError):
+                        load_spec_source({"url": "https://example.test/openapi.yaml"})
+                self.assertFalse(_URL_SPEC_CACHE)
+
+    def test_url_source_validation_errors_are_clear(self):
+        cases = [
+            ({}, "url"),
+            ({"url": "ftp://example.test/openapi.yaml"}, "Unsupported URL scheme"),
+            ({"url": "https://example.test/openapi.yaml", "headers": []}, "headers"),
+        ]
+        for source, expected in cases:
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(ValueError, expected):
+                    load_spec_source(source)
+
+    def test_spec_get_line_span_from_url_source_text(self):
+        source_text = _minimal_spec_text()
+        with patch("openapi_tools_mcp.tools._fetch_url", return_value=source_text):
+            loaded = load_spec_source({"url": "https://example.test/openapi.yaml"})
+
+        result = spec_get(
+            loaded["spec"],
+            "schemas",
+            "Pet",
+            source_text=loaded["source_text"],
+        )
+
+        self.assertEqual(result["value"], {"type": "object"})
+        self.assertIsInstance(result["line_start"], int)
+        self.assertIsInstance(result["line_end"], int)
+
+
+class McpToolSourceTests(unittest.TestCase):
+    def setUp(self):
+        _URL_SPEC_CACHE.clear()
+
+    def test_mcp_tools_keep_local_path_behavior(self):
+        info = mcp_server.spec_info.fn(str(FIXTURE_PATH))
+
+        self.assertEqual(info["info"]["title"], "Swagger Petstore - OpenAPI 3.0")
+
+    def test_mcp_tools_accept_url_source_object(self):
+        source = {"url": "https://example.test/openapi.yaml"}
+        with patch(
+            "openapi_tools_mcp.tools._fetch_url", return_value=_minimal_spec_text()
+        ) as fetch_stub:
+            info = mcp_server.spec_info.fn(source)
+            paths = mcp_server.spec_list.fn("paths", source)
+            schema = mcp_server.spec_get.fn("schemas", "Pet", source)
+
+        self.assertEqual(info["info"]["title"], "Remote")
+        self.assertEqual(paths, [{"path": "/pets", "verbs": ["get"]}])
+        self.assertEqual(schema["value"], {"type": "object"})
+        self.assertIsInstance(schema["line_start"], int)
+        fetch_stub.assert_called_once_with("https://example.test/openapi.yaml", {})
+
+
+class McpToolDocumentationTests(unittest.TestCase):
+    def test_mcp_tool_metadata_documents_url_sources(self):
+        for tool in [
+            mcp_server.spec_info,
+            mcp_server.spec_list,
+            mcp_server.spec_get,
+        ]:
+            with self.subTest(tool=tool.name):
+                description = tool.description
+                spec_path_schema = tool.parameters["properties"]["spec_path"]
+
+                self.assertIn("local path string or URL source object", description)
+                self.assertIn('"url"', description)
+                self.assertIn("headers are optional", description)
+                self.assertIn("cached in memory for 15 minutes", description)
+                self.assertIn("stale fallback", description)
+                self.assertEqual(
+                    spec_path_schema,
+                    {
+                        "anyOf": [
+                            {"type": "string"},
+                            {"additionalProperties": True, "type": "object"},
+                        ]
+                    },
+                )
 
 
 class SpecListFilteringTests(unittest.TestCase):

@@ -3,7 +3,12 @@
 from copy import deepcopy
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+import socket
+import time
+from typing import Any, Dict, Iterable, List, Mapping, Tuple
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from openapi_spec_validator import validate_spec
 from openapi_spec_validator.readers import read_from_filename
@@ -11,12 +16,133 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SPEC_PATH = PROJECT_ROOT / "tests" / "openapi.example.yml"
+URL_CACHE_TTL_SECONDS = 15 * 60
+URL_REQUEST_TIMEOUT_SECONDS = 10.0
+SUPPORTED_URL_SCHEMES = {"http", "https"}
+_URL_SPEC_CACHE: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], Dict[str, Any]] = {}
+
+
+class _UrlFetchError(Exception):
+    """Base class for URL fetch failures."""
+
+
+class _UrlHttpError(_UrlFetchError):
+    def __init__(self, status_code: int, reason: str):
+        super().__init__(f"HTTP {status_code} {reason}".strip())
+        self.status_code = status_code
+        self.reason = reason
+
+
+class _UrlNetworkError(_UrlFetchError):
+    """Network-level URL fetch failure."""
 
 
 def load_spec(path: Path) -> Dict[str, Any]:
     """Read and return the OpenAPI spec dict plus its source URL."""
     spec_dict, spec_url = read_from_filename(str(path))
     return {"spec": spec_dict, "spec_url": spec_url}
+
+
+def _monotonic() -> float:
+    return time.monotonic()
+
+
+def _normalize_headers(headers: Any) -> Dict[str, str]:
+    if headers is None:
+        return {}
+    if not isinstance(headers, Mapping):
+        raise ValueError(
+            "URL source 'headers' must be an object mapping names to values."
+        )
+    return {str(name): str(value) for name, value in headers.items()}
+
+
+def _url_cache_key(
+    url: str, headers: Mapping[str, str]
+) -> Tuple[str, Tuple[Tuple[str, str], ...]]:
+    return (url, tuple(sorted(headers.items())))
+
+
+def _parse_url_source(source: Mapping[str, Any]) -> Tuple[str, Dict[str, str]]:
+    raw_url = source.get("url")
+    if not isinstance(raw_url, str) or not raw_url:
+        raise ValueError("URL source must include a non-empty string 'url'.")
+
+    parsed = urlparse(raw_url)
+    if parsed.scheme not in SUPPORTED_URL_SCHEMES:
+        supported = ", ".join(sorted(SUPPORTED_URL_SCHEMES))
+        raise ValueError(
+            f"Unsupported URL scheme '{parsed.scheme}'. Expected one of: {supported}."
+        )
+
+    return raw_url, _normalize_headers(source.get("headers"))
+
+
+def _fetch_url(url: str, headers: Mapping[str, str]) -> str:
+    request = Request(url, headers=dict(headers))
+    try:
+        with urlopen(request, timeout=URL_REQUEST_TIMEOUT_SECONDS) as response:
+            body = response.read()
+            charset = response.headers.get_content_charset() or "utf-8"
+    except HTTPError as exc:
+        raise _UrlHttpError(exc.code, exc.reason) from exc
+    except (URLError, TimeoutError, socket.timeout, OSError) as exc:
+        raise _UrlNetworkError(str(exc)) from exc
+
+    return body.decode(charset)
+
+
+def _parse_spec_text(source_text: str, spec_url: str) -> Dict[str, Any]:
+    try:
+        spec = yaml.safe_load(source_text)
+    except yaml.YAMLError as exc:
+        raise ValueError(
+            f"Unable to parse OpenAPI spec from {spec_url}: {exc}"
+        ) from exc
+    if not isinstance(spec, dict):
+        raise ValueError(f"OpenAPI spec from {spec_url} must be a JSON/YAML object.")
+    return {"spec": spec, "spec_url": spec_url, "source_text": source_text}
+
+
+def _load_url_spec(source: Mapping[str, Any]) -> Dict[str, Any]:
+    url, headers = _parse_url_source(source)
+    cache_key = _url_cache_key(url, headers)
+    cached = _URL_SPEC_CACHE.get(cache_key)
+    now = _monotonic()
+    if cached and now - cached["loaded_at"] <= URL_CACHE_TTL_SECONDS:
+        return cached["loaded"]
+
+    try:
+        loaded = _parse_spec_text(_fetch_url(url, headers), url)
+    except _UrlHttpError as exc:
+        if cached and 500 <= exc.status_code <= 599:
+            return cached["loaded"]
+        raise ValueError(
+            f"Failed to download OpenAPI spec from {url}: HTTP {exc.status_code} {exc.reason}"
+        ) from exc
+    except _UrlNetworkError as exc:
+        if cached:
+            return cached["loaded"]
+        raise ValueError(f"Failed to download OpenAPI spec from {url}: {exc}") from exc
+
+    _URL_SPEC_CACHE[cache_key] = {"loaded_at": now, "loaded": loaded}
+    return loaded
+
+
+def load_spec_source(source: str | Path | Mapping[str, Any]) -> Dict[str, Any]:
+    """Read an OpenAPI spec from a local path string/path or URL source object."""
+    if isinstance(source, Mapping):
+        return _load_url_spec(source)
+
+    if isinstance(source, (str, Path)):
+        path = Path(source).expanduser().resolve()
+        loaded = load_spec(path)
+        loaded["source_path"] = path
+        return loaded
+
+    raise ValueError(
+        "spec_path must be a local path string or a URL source object with 'url' and optional 'headers'."
+    )
 
 
 def spec_info(spec: Dict[str, Any]) -> Dict[str, Any]:
@@ -248,9 +374,11 @@ def _section_keys(section: str, name: str) -> List[str]:
     )
 
 
-def _find_line_span(spec_path: Path, keys: List[str]) -> Tuple[int | None, int | None]:
-    """Find start/end line numbers (0-based) for a nested key path in the YAML file."""
-    root = yaml.compose(spec_path.read_text())
+def _find_line_span_in_text(
+    source_text: str, keys: List[str]
+) -> Tuple[int | None, int | None]:
+    """Find start/end line numbers (0-based) for a nested key path in YAML text."""
+    root = yaml.compose(source_text)
     node = root
     for key in keys:
         if not hasattr(node, "value"):
@@ -269,12 +397,18 @@ def _find_line_span(spec_path: Path, keys: List[str]) -> Tuple[int | None, int |
     return (start, end)
 
 
+def _find_line_span(spec_path: Path, keys: List[str]) -> Tuple[int | None, int | None]:
+    """Find start/end line numbers (0-based) for a nested key path in the YAML file."""
+    return _find_line_span_in_text(spec_path.read_text(), keys)
+
+
 def spec_get(
     spec: Dict[str, Any],
     section: str,
     name: str,
     *,
     spec_path: Path | None = None,
+    source_text: str | None = None,
     resolve_refs: bool = True,
 ) -> Dict[str, Any]:
     """Get a specific item from supported sections, with optional line span.
@@ -370,7 +504,11 @@ def spec_get(
 
     line_start: int | None = None
     line_end: int | None = None
-    if spec_path:
+    if source_text is not None:
+        line_start, line_end = _find_line_span_in_text(
+            source_text, _section_keys(section, name)
+        )
+    elif spec_path:
         line_start, line_end = _find_line_span(spec_path, _section_keys(section, name))
     return {"value": value, "line_start": line_start, "line_end": line_end}
 
