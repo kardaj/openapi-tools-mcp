@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -18,6 +19,19 @@ from openapi_tools_mcp.tools import (
 )
 
 FIXTURE_PATH = Path(__file__).parent / "openapi.example.yml"
+
+
+def _call_mcp_tool(tool, *args, **kwargs):
+    """Call a FastMCP-decorated tool across supported FastMCP versions."""
+    if hasattr(tool, "fn"):
+        return tool.fn(*args, **kwargs)
+    return tool(*args, **kwargs)
+
+
+def _registered_mcp_tools():
+    if hasattr(mcp_server.mcp, "get_tools"):
+        return asyncio.run(mcp_server.mcp.get_tools())
+    return {tool.name: tool for tool in asyncio.run(mcp_server.mcp.list_tools())}
 
 
 def _minimal_spec_text(title="Remote"):
@@ -384,7 +398,7 @@ class McpToolSourceTests(unittest.TestCase):
         _URL_SPEC_CACHE.clear()
 
     def test_mcp_tools_keep_local_path_behavior(self):
-        info = mcp_server.spec_info.fn(str(FIXTURE_PATH))
+        info = _call_mcp_tool(mcp_server.spec_info, str(FIXTURE_PATH))
 
         self.assertEqual(info["info"]["title"], "Swagger Petstore - OpenAPI 3.0")
 
@@ -393,9 +407,9 @@ class McpToolSourceTests(unittest.TestCase):
         with patch(
             "openapi_tools_mcp.tools._fetch_url", return_value=_minimal_spec_text()
         ) as fetch_stub:
-            info = mcp_server.spec_info.fn(source)
-            paths = mcp_server.spec_list.fn("paths", source)
-            schema = mcp_server.spec_get.fn("schemas", "Pet", source)
+            info = _call_mcp_tool(mcp_server.spec_info, source)
+            paths = _call_mcp_tool(mcp_server.spec_list, "paths", source)
+            schema = _call_mcp_tool(mcp_server.spec_get, "schemas", "Pet", source)
 
         self.assertEqual(info["info"]["title"], "Remote")
         self.assertEqual(paths, [{"path": "/pets", "verbs": ["get"]}])
@@ -406,12 +420,10 @@ class McpToolSourceTests(unittest.TestCase):
 
 class McpToolDocumentationTests(unittest.TestCase):
     def test_mcp_tool_metadata_documents_url_sources(self):
-        for tool in [
-            mcp_server.spec_info,
-            mcp_server.spec_list,
-            mcp_server.spec_get,
-        ]:
-            with self.subTest(tool=tool.name):
+        tools = _registered_mcp_tools()
+        for tool_name in ["spec_info", "spec_list", "spec_get"]:
+            with self.subTest(tool=tool_name):
+                tool = tools[tool_name]
                 description = tool.description
                 spec_path_schema = tool.parameters["properties"]["spec_path"]
 
