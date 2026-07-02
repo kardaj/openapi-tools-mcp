@@ -8,3 +8,6 @@ __pycache__/
 uv.lock
 .*_cache
 dist/
+changes/current/
+prompts/
+.agent-flow/

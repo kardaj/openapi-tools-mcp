@@ -58,3 +58,7 @@ include = ["src", "README.md", "LICENSE"]
 [tool.pytest.ini_options]
 addopts = "--black --ruff --cov=src --cov-report=term-missing"
 testpaths = ["tests"]
+
+[tool.agent-flow]
+mode = "embedded"
+local_cli = ".agent-flow/cli.sh"
