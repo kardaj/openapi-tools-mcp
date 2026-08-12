@@ -1,0 +1,191 @@
+openapi: 3.1.0
+info:
+  title: Social Data API
+  version: "1.0"
+  description: Compact OpenAPI 3.1 sample for public social data lookups.
+servers:
+  - url: https://social.example.test
+security:
+  - apiKey: []
+  - oauthBearer: []
+tags:
+  - name: Posts
+  - name: Users
+  - name: Trends
+paths:
+  /posts/search:
+    get:
+      operationId: searchPosts
+      summary: Search public posts by query.
+      tags: [Posts]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query.
+          schema:
+            type: string
+        - name: queryType
+          in: query
+          description: Sort order.
+          schema:
+            type: string
+            enum: [Latest, Top]
+            default: Latest
+        - name: cursor
+          in: query
+          description: Pagination cursor from the previous response.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum posts to return.
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Search results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedPosts"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /users/{id}:
+    get:
+      operationId: getUser
+      summary: Get a public user profile by username or user ID.
+      tags: [Users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Username without @ or numeric user ID.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /trends:
+    get:
+      operationId: getTrends
+      summary: Get trending hashtags and topics by region.
+      tags: [Trends]
+      parameters:
+        - name: woeid
+          in: query
+          description: Region WOEID code.
+          schema:
+            type: integer
+            default: 1
+        - name: count
+          in: query
+          description: Number of trending topics returned.
+          schema:
+            type: integer
+            default: 30
+            minimum: 1
+            maximum: 50
+      responses:
+        "200":
+          description: Trending topics.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrendsResponse"
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    oauthBearer:
+      type: http
+      scheme: bearer
+  schemas:
+    PaginatedPosts:
+      type: object
+      required: [posts]
+      properties:
+        posts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Post"
+        has_next_page:
+          type: boolean
+        next_cursor:
+          type: string
+    Post:
+      type: object
+      required: [id, text]
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        author:
+          $ref: "#/components/schemas/UserProfile"
+    UserProfile:
+      type: object
+      required: [id, username]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        name:
+          type: string
+        verified:
+          type: boolean
+        followers:
+          type: integer
+    TrendsResponse:
+      type: object
+      required: [trends, total, woeid]
+      properties:
+        trends:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+              rank:
+                type: integer
+              query:
+                type: string
+        total:
+          type: integer
+        woeid:
+          type: integer
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+  responses:
+    Unauthenticated:
+      description: Authentication required.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

@@ -1,13 +1,13 @@
 import asyncio
 import unittest
-from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from openapi_tools_mcp import server as mcp_server
 from openapi_tools_mcp.tools import (
-    URL_CACHE_TTL_SECONDS,
     _URL_SPEC_CACHE,
+    URL_CACHE_TTL_SECONDS,
     _UrlHttpError,
     _UrlNetworkError,
     load_spec,
@@ -360,9 +360,11 @@ class SpecSourceTests(unittest.TestCase):
         ]:
             with self.subTest(failure=failure):
                 _URL_SPEC_CACHE.clear()
-                with patch("openapi_tools_mcp.tools._fetch_url", side_effect=failure):
-                    with self.assertRaises(ValueError):
-                        load_spec_source({"url": "https://example.test/openapi.yaml"})
+                with (
+                    patch("openapi_tools_mcp.tools._fetch_url", side_effect=failure),
+                    self.assertRaises(ValueError),
+                ):
+                    load_spec_source({"url": "https://example.test/openapi.yaml"})
                 self.assertFalse(_URL_SPEC_CACHE)
 
     def test_url_source_validation_errors_are_clear(self):
@@ -372,9 +374,11 @@ class SpecSourceTests(unittest.TestCase):
             ({"url": "https://example.test/openapi.yaml", "headers": []}, "headers"),
         ]
         for source, expected in cases:
-            with self.subTest(source=source):
-                with self.assertRaisesRegex(ValueError, expected):
-                    load_spec_source(source)
+            with (
+                self.subTest(source=source),
+                self.assertRaisesRegex(ValueError, expected),
+            ):
+                load_spec_source(source)
 
     def test_spec_get_line_span_from_url_source_text(self):
         source_text = _minimal_spec_text()
@@ -576,9 +580,8 @@ class SpecGetErrorsTests(unittest.TestCase):
             ("examples", "Nope"),
         ]
         for section, name in missing:
-            with self.subTest(section=section):
-                with self.assertRaises(KeyError):
-                    spec_get(self.spec, section, name)
+            with self.subTest(section=section), self.assertRaises(KeyError):
+                spec_get(self.spec, section, name)
 
 
 class SpecGetRefErrorTests(unittest.TestCase):
@@ -646,12 +649,14 @@ class SpecGetLineSpanTests(unittest.TestCase):
 class ValidateSpecTests(unittest.TestCase):
     def test_validate_example_spec_smoke(self):
         fake_spec = {"openapi": "3.0.0", "info": {"title": "OK", "version": "1.0.0"}}
-        with patch(
-            "openapi_tools_mcp.tools.load_spec",
-            return_value={"spec": fake_spec, "spec_url": "file://fake"},
-        ) as load_stub:
-            with patch("openapi_tools_mcp.tools.validate_spec") as validate_stub:
-                result = validate_example_spec(Path("unused.yml"))
+        with (
+            patch(
+                "openapi_tools_mcp.tools.load_spec",
+                return_value={"spec": fake_spec, "spec_url": "file://fake"},
+            ) as load_stub,
+            patch("openapi_tools_mcp.tools.validate_spec") as validate_stub,
+        ):
+            result = validate_example_spec(Path("unused.yml"))
         load_stub.assert_called_once()
         validate_stub.assert_called_once_with(fake_spec, spec_url="file://fake")
         self.assertEqual(result["info"], spec_info(fake_spec))
