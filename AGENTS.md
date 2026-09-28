@@ -15,5 +15,6 @@
 
 This section is managed by `agent-flow sync`; do not edit it directly. Add project-specific instructions outside the `agent-flow` markers.
 
-- Before making implementation changes, checking PR state, addressing PR comments, or running PR checks, read and follow `prompts/agent-flow-implement.md`.
+- Before making implementation changes, checking PR state, addressing PR comments, or running PR checks, run `.agent-flow/cli.sh agent prompt implement` and follow its output.
+- For requests to change quality gates, prompts, or project knowledge, treat it as configuration work: update durable hooks in `agent-flow.config` after inspecting `.agent-flow/cli.sh agent config help`, validate with `.agent-flow/cli.sh agent validate config --intended <path>`, then run `.agent-flow/cli.sh sync`; durable prompt behavior lives in package templates and `.agent-flow/templates` overrides; inspect prompts with `.agent-flow/cli.sh agent prompt <mode>`.
 <!-- agent-flow:end -->
