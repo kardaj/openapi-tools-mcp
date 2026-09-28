@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from openapi_tools_mcp.cli_cache import (
+    CLI_CACHE_DIR_ENV,
     CLI_CACHE_LOCK_STALE_SECONDS,
     _cache_digest,
     _entry_path,
@@ -112,7 +113,13 @@ class CliDiskCacheTests(unittest.TestCase):
     def test_platform_cache_locations_follow_user_conventions(self):
         with (
             patch("openapi_tools_mcp.cli_cache.sys.platform", "win32"),
-            patch.dict(os.environ, {"LOCALAPPDATA": "C:/Users/test/AppData/Local"}),
+            patch.dict(
+                os.environ,
+                {
+                    CLI_CACHE_DIR_ENV: "",
+                    "LOCALAPPDATA": "C:/Users/test/AppData/Local",
+                },
+            ),
         ):
             self.assertEqual(
                 _user_cache_dir(),
@@ -120,6 +127,7 @@ class CliDiskCacheTests(unittest.TestCase):
             )
         with (
             patch("openapi_tools_mcp.cli_cache.sys.platform", "darwin"),
+            patch.dict(os.environ, {CLI_CACHE_DIR_ENV: ""}),
             patch(
                 "openapi_tools_mcp.cli_cache.Path.home",
                 return_value=Path("/Users/test"),
@@ -131,9 +139,56 @@ class CliDiskCacheTests(unittest.TestCase):
             )
         with (
             patch("openapi_tools_mcp.cli_cache.sys.platform", "linux"),
-            patch.dict(os.environ, {"XDG_CACHE_HOME": "/cache/test"}),
+            patch.dict(
+                os.environ,
+                {CLI_CACHE_DIR_ENV: "", "XDG_CACHE_HOME": "/cache/test"},
+            ),
         ):
             self.assertEqual(_user_cache_dir(), Path("/cache/test/openapi-tools-mcp"))
+
+    def test_cache_directory_environment_override_is_exact_on_all_platforms(self):
+        override = self.cache_dir.parent / "configured-cache"
+        for platform in ["darwin", "linux", "win32"]:
+            with (
+                self.subTest(platform=platform),
+                patch("openapi_tools_mcp.cli_cache.sys.platform", platform),
+                patch.dict(os.environ, {CLI_CACHE_DIR_ENV: str(override)}),
+            ):
+                self.assertEqual(_user_cache_dir(), override)
+
+    def test_explicit_cache_directory_wins_over_environment_override(self):
+        environment_cache = self.cache_dir.parent / "environment-cache"
+        with (
+            patch.dict(os.environ, {CLI_CACHE_DIR_ENV: str(environment_cache)}),
+            patch(
+                "openapi_tools_mcp.cli_cache._fetch_url",
+                return_value=_spec_text("Explicit"),
+            ),
+        ):
+            loaded = _load_cli_url_spec(self.source, cache_dir=self.cache_dir)
+
+        self.assertEqual(loaded["spec"]["info"]["title"], "Explicit")
+        self.assertTrue(self.entry_path().is_file())
+        self.assertFalse(environment_cache.exists())
+
+    def test_unwritable_environment_cache_degrades_to_uncached_success(self):
+        environment_cache = self.cache_dir.parent / "unwritable-cache"
+        with (
+            patch.dict(os.environ, {CLI_CACHE_DIR_ENV: str(environment_cache)}),
+            patch(
+                "openapi_tools_mcp.cli_cache._secure_cache_dir", return_value=False
+            ) as secure_cache_dir,
+            patch(
+                "openapi_tools_mcp.cli_cache._fetch_url",
+                return_value=_spec_text("Uncached"),
+            ) as fetch,
+        ):
+            loaded = _load_cli_url_spec(self.source)
+
+        self.assertEqual(loaded["spec"]["info"]["title"], "Uncached")
+        secure_cache_dir.assert_called_once_with(environment_cache)
+        fetch.assert_called_once()
+        self.assertFalse(environment_cache.exists())
 
     def test_cache_names_permissions_and_contents_protect_headers(self):
         with patch(
@@ -327,21 +382,34 @@ class CliDiskCacheProcessTests(unittest.TestCase):
         self.server.server_close()
         self.server_thread.join(timeout=2)
 
-    def run_callers(self, cache_dir):
+    def run_callers(self, cache_dir, *, use_environment=False):
         url = f"http://127.0.0.1:{self.server.server_port}/openapi.yaml"
-        script = (
-            "from pathlib import Path; import sys; "
-            "from openapi_tools_mcp.cli_cache import _load_cli_url_spec; "
-            "loaded = _load_cli_url_spec({'url': sys.argv[1]}, "
-            "cache_dir=Path(sys.argv[2])); "
-            "print(loaded['spec']['info']['title'])"
-        )
+        if use_environment:
+            script = (
+                "import sys; "
+                "from openapi_tools_mcp.cli_cache import _load_cli_url_spec; "
+                "loaded = _load_cli_url_spec({'url': sys.argv[1]}); "
+                "print(loaded['spec']['info']['title'])"
+            )
+            arguments = [url]
+            environment = os.environ | {CLI_CACHE_DIR_ENV: str(cache_dir)}
+        else:
+            script = (
+                "from pathlib import Path; import sys; "
+                "from openapi_tools_mcp.cli_cache import _load_cli_url_spec; "
+                "loaded = _load_cli_url_spec({'url': sys.argv[1]}, "
+                "cache_dir=Path(sys.argv[2])); "
+                "print(loaded['spec']['info']['title'])"
+            )
+            arguments = [url, str(cache_dir)]
+            environment = None
         processes = [
             subprocess.Popen(
-                [sys.executable, "-c", script, url, str(cache_dir)],
+                [sys.executable, "-c", script, *arguments],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env=environment,
             )
             for _ in range(4)
         ]
@@ -370,3 +438,14 @@ class CliDiskCacheProcessTests(unittest.TestCase):
                     self.assertEqual(self.request_count, 1)
                 self.assertFalse(list(cache_dir.glob("*.tmp")))
                 self.assertFalse(list(cache_dir.glob("*.lock")))
+
+    def test_environment_cache_is_shared_across_processes(self):
+        with TemporaryDirectory() as temporary_directory:
+            cache_dir = Path(temporary_directory) / "configured-cache"
+            self.run_callers(cache_dir, use_environment=True)
+
+            with self.request_count_lock:
+                self.assertEqual(self.request_count, 1)
+            self.assertEqual(len(list(cache_dir.glob("*.spec"))), 1)
+            self.assertFalse(list(cache_dir.glob("*.tmp")))
+            self.assertFalse(list(cache_dir.glob("*.lock")))

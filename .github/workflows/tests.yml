@@ -24,4 +24,4 @@ jobs:
         uses: astral-sh/setup-uv@v3
 
       - name: Run tests
-        run: uv run --extra dev pytest
+        run: uv run --active --extra dev pytest

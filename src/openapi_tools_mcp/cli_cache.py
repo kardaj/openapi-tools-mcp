@@ -24,6 +24,7 @@ from .tools import (
 
 CLI_CACHE_LOCK_POLL_SECONDS = 0.05
 CLI_CACHE_LOCK_STALE_SECONDS = URL_REQUEST_TIMEOUT_SECONDS * 3
+CLI_CACHE_DIR_ENV = "OPENAPI_TOOLS_CACHE_DIR"
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,9 @@ class _CacheEntry:
 
 def _user_cache_dir() -> Path:
     """Return the platform's conventional per-user cache directory."""
+    override = os.environ.get(CLI_CACHE_DIR_ENV)
+    if override:
+        return Path(override).expanduser()
     if sys.platform == "win32":
         root = os.environ.get("LOCALAPPDATA")
         if root:
@@ -178,7 +182,8 @@ def _load_cli_url_spec(
     cache_dir: Path | None = None,
 ) -> Dict[str, Any]:
     url, headers = _parse_url_source(source)
-    cache_dir = cache_dir or _user_cache_dir()
+    if cache_dir is None:
+        cache_dir = _user_cache_dir()
     if not _secure_cache_dir(cache_dir):
         return _download(url, headers, None)[0]
 

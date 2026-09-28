@@ -23,11 +23,27 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v3
 
+      - name: Verify tag matches package version
+        run: |
+          package_version="$(uv run --active python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          test "$GITHUB_REF_NAME" = "$package_version"
+
       - name: Run tests
-        run: uv run --extra dev pytest
+        run: uv run --active --extra dev pytest
 
       - name: Build sdist & wheel
-        run: uv run python -m build
+        run: uv run --active --extra dev python -m build
+
+      - name: Verify distributions and CLI entry point
+        run: |
+          uv run --active --extra dev twine check dist/*
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          uv run --active --no-project --with "$wheel" python -c 'from importlib.metadata import distribution; scripts = {entry.name for entry in distribution("openapi-tools-mcp").entry_points if entry.group == "console_scripts"}; assert {"openapi-tools-cli", "openapi-tools-mcp"} <= scripts'
+          uv run --active --no-project --with "$wheel" openapi-tools-cli --help
+          uv run --active --no-project --with "$wheel" openapi-tools-cli info tests/openapi.example.yml
+          cache_dir="$RUNNER_TEMP/openapi-tools-mcp-cache"
+          OPENAPI_TOOLS_CACHE_DIR="$cache_dir" uv run --active --no-project --with "$wheel" python -c 'import os; from openapi_tools_mcp.cli_cache import _user_cache_dir; assert str(_user_cache_dir()) == os.environ["OPENAPI_TOOLS_CACHE_DIR"]'
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
