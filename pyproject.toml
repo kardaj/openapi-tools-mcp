@@ -46,6 +46,7 @@ Repository = "https://github.com/kardaj/openapi-tools-mcp"
 Issues = "https://github.com/kardaj/openapi-tools-mcp/issues"
 
 [project.scripts]
+openapi-tools-cli = "openapi_tools_mcp.cli:main"
 openapi-tools-mcp = "openapi_tools_mcp.server:main"
 
 [tool.hatch.build.targets.wheel]

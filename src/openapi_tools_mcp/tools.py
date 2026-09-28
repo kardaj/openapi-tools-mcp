@@ -5,7 +5,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 import socket
 import time
-from typing import Any, Dict, Iterable, List, Mapping, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -511,6 +511,58 @@ def spec_get(
     elif spec_path:
         line_start, line_end = _find_line_span(spec_path, _section_keys(section, name))
     return {"value": value, "line_start": line_start, "line_end": line_end}
+
+
+SpecSource = str | Path | Mapping[str, Any]
+SpecSourceLoader = Callable[[SpecSource], Dict[str, Any]]
+
+
+def inspect_spec_info(
+    spec_path: SpecSource,
+    *,
+    source_loader: SpecSourceLoader = load_spec_source,
+) -> Dict[str, Any]:
+    """Load a spec source and return its summary."""
+    loaded = source_loader(spec_path)
+    return spec_info(loaded["spec"])
+
+
+def inspect_spec_list(
+    section: str,
+    spec_path: SpecSource,
+    filter_by_glob: str | None = None,
+    filter_by_tag: str | Iterable[str] | None = None,
+    *,
+    source_loader: SpecSourceLoader = load_spec_source,
+) -> Any:
+    """Load a spec source and list a section."""
+    loaded = source_loader(spec_path)
+    return spec_list(
+        loaded["spec"],
+        section,
+        filter_by_glob=filter_by_glob,
+        filter_by_tag=filter_by_tag,
+    )
+
+
+def inspect_spec_get(
+    section: str,
+    name: str,
+    spec_path: SpecSource,
+    resolve_refs: bool = True,
+    *,
+    source_loader: SpecSourceLoader = load_spec_source,
+) -> Dict[str, Any]:
+    """Load a spec source and retrieve one item."""
+    loaded = source_loader(spec_path)
+    return spec_get(
+        loaded["spec"],
+        section,
+        name,
+        spec_path=loaded.get("source_path"),
+        source_text=loaded.get("source_text"),
+        resolve_refs=resolve_refs,
+    )
 
 
 def validate_example_spec(spec_path: Path | None = None) -> Dict[str, Any]:

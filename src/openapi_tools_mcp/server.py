@@ -4,18 +4,12 @@ from typing import Any, Dict, Iterable
 
 from fastmcp import FastMCP
 
-from .tools import (
-    load_spec_source,
+from .descriptions import (
+    SPEC_GET_DESCRIPTION,
+    SPEC_INFO_DESCRIPTION,
+    SPEC_LIST_DESCRIPTION,
 )
-from .tools import (
-    spec_get as spec_get_impl,
-)
-from .tools import (
-    spec_info as spec_info_impl,
-)
-from .tools import (
-    spec_list as spec_list_impl,
-)
+from .tools import inspect_spec_get, inspect_spec_info, inspect_spec_list
 
 SpecPath = str | Dict[str, Any]
 
@@ -32,45 +26,37 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool()
+@mcp.tool(description=SPEC_INFO_DESCRIPTION)
 def spec_info(spec_path: SpecPath) -> Dict[str, Any]:
-    """Quickly summarize an OpenAPI spec from a local path string or URL source object. For remote specs, pass {"url": "https://example.com/openapi.yaml", "headers": {"Header-Name": "value"}}; headers are optional, only http/https URLs are supported, and successful downloads are cached in memory for 15 minutes with stale fallback on network errors or HTTP 5XX refresh failures."""
-    loaded = load_spec_source(spec_path)
-    return spec_info_impl(loaded["spec"])
+    return inspect_spec_info(spec_path)
 
 
-@mcp.tool()
+@mcp.tool(description=SPEC_LIST_DESCRIPTION)
 def spec_list(
     section: str,
     spec_path: SpecPath,
     filter_by_glob: str | None = None,
     filter_by_tag: str | Iterable[str] | None = None,
 ) -> Any:
-    """Enumerate keys within a spec section from a local path string or URL source object. For remote specs, pass spec_path as {"url": "https://example.com/openapi.yaml", "headers": {"Header-Name": "value"}}; headers are optional, only http/https URLs are supported, and successful downloads are cached in memory for 15 minutes with stale fallback on network errors or HTTP 5XX refresh failures."""
-    loaded = load_spec_source(spec_path)
-    return spec_list_impl(
-        loaded["spec"],
+    return inspect_spec_list(
         section,
+        spec_path,
         filter_by_glob=filter_by_glob,
         filter_by_tag=filter_by_tag,
     )
 
 
-@mcp.tool()
+@mcp.tool(description=SPEC_GET_DESCRIPTION)
 def spec_get(
     section: str,
     name: str,
     spec_path: SpecPath,
     resolve_refs: bool = True,
 ) -> Any:
-    """Retrieve a specific item from a local path string or URL source object, with optional $ref resolution and source line numbers. For remote specs, pass spec_path as {"url": "https://example.com/openapi.yaml", "headers": {"Header-Name": "value"}}; headers are optional, only http/https URLs are supported, and successful downloads are cached in memory for 15 minutes with stale fallback on network errors or HTTP 5XX refresh failures."""
-    loaded = load_spec_source(spec_path)
-    return spec_get_impl(
-        loaded["spec"],
+    return inspect_spec_get(
         section,
         name,
-        spec_path=loaded.get("source_path"),
-        source_text=loaded.get("source_text"),
+        spec_path,
         resolve_refs=resolve_refs,
     )
 
