@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openapi-tools-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "An MCP server powered by fastMCP for inspecting local or remote OpenAPI specs."
 readme = "README.md"
 requires-python = ">=3.10"

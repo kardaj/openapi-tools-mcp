@@ -54,6 +54,12 @@ uv tool install openapi-tools-mcp
 openapi-tools-cli info ./openapi.yaml
 ```
 
+Run `openapi-tools-cli --help` (or `-h`) for a single help page covering `info`, `list`, and `get`, including supported sections, output shapes, reference and filter behavior, and examples. Each command has its own section; shared source, header, and help arguments appear once. Command-specific help, such as `openapi-tools-cli list --help`, shows that command's details and examples.
+
+Start with `info` to confirm the OpenAPI version, API metadata, and server base URLs. Use `list` to discover names, then `get` to inspect one item. These commands read specifications without calling API operations. `info` returns an object with `openapi`, `info`, and `servers`; `list paths` returns an array of `{path, verbs}` objects, while other sections return arrays of names. `get` returns `{value, line_start, line_end}`; line fields are zero-based source positions, or `null` when unavailable.
+
+Both `list` and `get` support `paths`, `schemas`, `parameters`, `responses`, `requestBodies`, `headers`, `securitySchemes`, `links`, `callbacks`, and `examples`. `list` additionally supports `tags`, which lists tags used by operations; `get` does not retrieve tags. For `get`, supply an exact path such as `/pet/{petId}` or a component name such as `Pet`.
+
 The CLI accepts local YAML or JSON paths, including paths with `~` and relative segments, and lowercase `http://` or `https://` URLs:
 
 ```bash
@@ -70,14 +76,14 @@ openapi-tools-cli info https://example.com/openapi.yaml \
   -H "Accept: application/yaml"
 ```
 
-`list` supports the existing glob filter and match-any tag filter. Each `--tag` occurrence accepts one tag:
+`list --glob` matches path or item names using shell-style wildcards such as `*`, `?`, and `[abc]`; quote patterns to prevent shell expansion. `--tag` filters paths by operation tags and schemas by `tags`/`x-tags`, and is ignored for other sections. Each occurrence accepts one tag, and repeated tags match any. For paths and schemas, an item must match both filters when `--glob` and `--tag` are supplied:
 
 ```bash
 openapi-tools-cli list paths ./openapi.yaml --glob '/pets/*'
 openapi-tools-cli list paths ./openapi.yaml --tag pet --tag admin
 ```
 
-`get` resolves local `$ref` values by default. Preserve references with `--no-resolve-refs`:
+`get` resolves local `#/...` `$ref` values by default; external references cannot be resolved. Preserve all references, including external ones, with `--no-resolve-refs`:
 
 ```bash
 openapi-tools-cli get schemas Pet ./openapi.yaml --no-resolve-refs

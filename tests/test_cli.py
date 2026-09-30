@@ -6,12 +6,13 @@ from io import StringIO
 import json
 import os
 from pathlib import Path
+import shlex
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
 from openapi_tools_mcp import server as mcp_server
-from openapi_tools_mcp.cli import main
+from openapi_tools_mcp.cli import build_parser, main
 
 FIXTURE_PATH = Path(__file__).parent / "openapi.example.yml"
 
@@ -289,7 +290,40 @@ class CliErrorAndHelpTests(unittest.TestCase):
                 self.assertEqual(stderr, "")
                 self.assertIn("usage:", stdout)
 
-    def test_subcommand_help_uses_shared_summaries_and_cli_guidance(self):
+    def test_top_level_help_includes_all_command_details_without_repetition(self):
+        with patch("openapi_tools_mcp.cli.load_cli_spec_source") as load_source:
+            for option in ["-h", "--help"]:
+                with self.subTest(option=option):
+                    status, stdout, stderr = _run_cli([option])
+                    self.assertEqual(status, 0)
+                    self.assertEqual(stderr, "")
+                    self.assertEqual(stdout.count("usage:"), 1)
+                    self.assertEqual(stdout.count("--header"), 1)
+                    self.assertEqual(stdout.count("--help"), 1)
+                    self.assertNotIn("cache", stdout)
+                    normalized_help = " ".join(stdout.split())
+                    for command_parser in build_parser().command_parsers:
+                        self.assertIn(command_parser.description, normalized_help)
+                        for action in command_parser._actions:
+                            self.assertIn(action.help, normalized_help)
+                    for heading in [
+                        "info source:",
+                        "list section source:",
+                        "get section name source:",
+                    ]:
+                        self.assertIn(heading, stdout)
+            load_source.assert_not_called()
+
+    def test_subcommand_help_stays_focused_on_that_command(self):
+        for command in ["info", "list", "get"]:
+            with self.subTest(command=command):
+                status, stdout, stderr = _run_cli([command, "--help"])
+                self.assertEqual(status, 0)
+                self.assertEqual(stderr, "")
+                self.assertEqual(stdout.count("usage:"), 1)
+                self.assertIn(f"usage: openapi-tools-cli {command} ", stdout)
+
+    def test_subcommand_help_uses_shared_summaries_and_source_guidance(self):
         for command, summary in [
             ("info", "Quickly summarize an OpenAPI spec"),
             ("list", "Enumerate keys within a spec section"),
@@ -301,9 +335,93 @@ class CliErrorAndHelpTests(unittest.TestCase):
                 self.assertEqual(stderr, "")
                 normalized_help = " ".join(stdout.split())
                 self.assertIn(summary, normalized_help)
-                self.assertIn("private 15-minute disk cache", normalized_help)
+                self.assertIn("local YAML/JSON path", normalized_help)
+                self.assertIn("URL request header", normalized_help)
+                self.assertNotIn("cache", stdout)
                 self.assertNotIn("URL source object", stdout)
                 self.assertNotIn("cached in memory", stdout)
+
+    def test_help_documents_outputs_defaults_and_filter_semantics(self):
+        guidance = {
+            "info": [
+                "openapi (version)",
+                "info (title, description",
+                "servers (base URLs)",
+            ],
+            "list": [
+                "JSON array",
+                "{path, verbs}",
+                "tags is list-only",
+                "items must match both",
+                "tags/x-tags",
+                "repeat to match any tag",
+                "ignored for other sections",
+                "quote the pattern",
+            ],
+            "get": [
+                "{value, line_start, line_end}",
+                "zero-based source positions",
+                "null when unavailable",
+                "local #/... $ref values by default",
+                "external references cannot be resolved",
+                "preserve all $ref values",
+            ],
+        }
+        for command, phrases in guidance.items():
+            for arguments in [["--help"], [command, "--help"]]:
+                with self.subTest(arguments=arguments, command=command):
+                    status, stdout, stderr = _run_cli(arguments)
+                    self.assertEqual(status, 0)
+                    self.assertEqual(stderr, "")
+                    normalized_help = " ".join(stdout.split())
+                    for phrase in phrases:
+                        self.assertIn(phrase, normalized_help)
+
+    def test_help_lists_all_supported_sections(self):
+        sections = [
+            "paths",
+            "schemas",
+            "parameters",
+            "responses",
+            "requestBodies",
+            "headers",
+            "securitySchemes",
+            "links",
+            "callbacks",
+            "examples",
+        ]
+        for arguments in [["--help"], ["list", "--help"], ["get", "--help"]]:
+            with self.subTest(arguments=arguments):
+                status, stdout, stderr = _run_cli(arguments)
+                self.assertEqual(status, 0)
+                self.assertEqual(stderr, "")
+                for section in sections:
+                    self.assertIn(section, stdout)
+                if arguments == ["get", "--help"]:
+                    self.assertNotIn("tags", stdout)
+                else:
+                    self.assertIn("tags (list-only)", stdout)
+
+    def test_local_help_examples_run_successfully(self):
+        for command_parser in build_parser().command_parsers:
+            for example in command_parser.epilog.splitlines()[1:]:
+                with self.subTest(example=example):
+                    arguments = shlex.split(example)[1:]
+                    if "|" in arguments:
+                        arguments = arguments[: arguments.index("|")]
+                    arguments = [
+                        str(FIXTURE_PATH) if value == "./openapi.yaml" else value
+                        for value in arguments
+                    ]
+                    status, stdout, stderr = _run_cli(arguments)
+                    self.assertEqual(status, 0)
+                    self.assertEqual(stderr, "")
+                    json.loads(stdout)
+                    for help_arguments in [["--help"], [arguments[0], "--help"]]:
+                        help_status, help_text, help_stderr = _run_cli(help_arguments)
+                        self.assertEqual(help_status, 0)
+                        self.assertEqual(help_stderr, "")
+                        self.assertIn(example, help_text)
 
 
 class PackagingAndMetadataTests(unittest.TestCase):

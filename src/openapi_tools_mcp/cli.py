@@ -11,67 +11,171 @@ from .cli_cache import load_cli_spec_source
 from .descriptions import SPEC_GET_SUMMARY, SPEC_INFO_SUMMARY, SPEC_LIST_SUMMARY
 from .tools import inspect_spec_get, inspect_spec_info, inspect_spec_list
 
+_GET_SECTIONS = (
+    "paths, schemas, parameters, responses, requestBodies, headers, "
+    "securitySchemes, links, callbacks, examples"
+)
+
+
+class _HelpFormatter(argparse.HelpFormatter):
+    """Wrap prose while preserving line breaks in example commands."""
+
+    def _fill_text(self, text: str, width: int, indent: str) -> str:
+        if "\n" in text:
+            return "\n".join(indent + line for line in text.splitlines())
+        return super()._fill_text(text, width, indent)
+
+
+class _CommandHelpParser(argparse.ArgumentParser):
+    """Render command details together, showing shared arguments only once."""
+
+    command_parsers: Sequence[argparse.ArgumentParser] = ()
+
+    def format_help(self) -> str:
+        formatter = self._get_formatter()
+        formatter.add_usage(self.usage, self._actions, self._mutually_exclusive_groups)
+        formatter.add_text(self.description)
+
+        shared_destinations = {"source", "header", "help"}
+        for parser in self.command_parsers:
+            positionals = " ".join(
+                action.metavar or action.dest
+                for action in parser._actions
+                if not action.option_strings
+            )
+            command = parser.prog.removeprefix(f"{self.prog} ")
+            formatter.start_section(f"{command} {positionals}")
+            formatter.add_text(parser.description)
+            formatter.add_arguments(
+                action
+                for action in parser._actions
+                if action.dest not in shared_destinations
+            )
+            formatter.end_section()
+
+        formatter.start_section("shared arguments and options")
+        formatter.add_arguments(
+            action
+            for action in self.command_parsers[0]._actions
+            if action.dest in shared_destinations
+        )
+        formatter.end_section()
+        formatter.add_text(self.epilog)
+        return formatter.format_help()
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the public command-line parser."""
-    parser = argparse.ArgumentParser(
+    parser = _CommandHelpParser(
         prog="openapi-tools-cli",
-        description="Inspect local or remote OpenAPI specifications and emit JSON.",
+        formatter_class=_HelpFormatter,
+        description=(
+            "Inspect local or remote OpenAPI specifications without calling API "
+            "operations. Write JSON to stdout; pipe it to jq for formatting. "
+            "Start with info, use list to discover names, then get to inspect one item."
+        ),
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(
+        dest="command", required=True, parser_class=argparse.ArgumentParser
+    )
 
     info_parser = subparsers.add_parser(
         "info",
         help=SPEC_INFO_SUMMARY,
+        formatter_class=_HelpFormatter,
         description=(
-            f"{SPEC_INFO_SUMMARY}. URL downloads use a private 15-minute disk cache."
+            f"{SPEC_INFO_SUMMARY}. Return an object with openapi (version), "
+            "info (title, description, and other API metadata), and servers "
+            "(base URLs). Use this first to confirm the spec and its servers."
         ),
+        epilog="examples:\n  openapi-tools-cli info ./openapi.yaml | jq",
     )
     _add_source_arguments(info_parser)
 
     list_parser = subparsers.add_parser(
         "list",
         help=SPEC_LIST_SUMMARY,
+        formatter_class=_HelpFormatter,
         description=(
-            f"{SPEC_LIST_SUMMARY}. URL downloads use a private 15-minute disk cache."
+            f"{SPEC_LIST_SUMMARY}. Return a JSON array: paths contains "
+            "{path, verbs} objects; other sections contain names. tags lists "
+            "tags used by operations. For paths and schemas, glob and tag "
+            "filters combine: items must match both. Use the returned names "
+            "with get; tags is list-only."
+        ),
+        epilog=(
+            "examples:\n"
+            "  openapi-tools-cli list paths ./openapi.yaml --glob '/pet*'\n"
+            "  openapi-tools-cli list paths ./openapi.yaml --tag pet --tag admin\n"
+            "  openapi-tools-cli list schemas ./openapi.yaml"
         ),
     )
     list_parser.add_argument(
         "section",
-        help="section to enumerate (for example: paths, schemas, or tags)",
+        help=f"section to enumerate: {_GET_SECTIONS}, tags (list-only)",
     )
     _add_source_arguments(list_parser)
     list_parser.add_argument(
         "--glob",
         dest="filter_by_glob",
         metavar="PATTERN",
-        help="filter names with the existing glob matching behavior",
+        help=(
+            "filter path or item names with shell-style wildcards (*, ?, [abc]); "
+            "quote the pattern to prevent shell expansion"
+        ),
     )
     list_parser.add_argument(
         "--tag",
         dest="filter_by_tag",
         action="append",
         metavar="TAG",
-        help="match this tag; repeat the option to match any of several tags",
+        help=(
+            "filter paths by operation tags or schemas by tags/x-tags; repeat "
+            "to match any tag (ignored for other sections)"
+        ),
     )
 
     get_parser = subparsers.add_parser(
         "get",
         help=SPEC_GET_SUMMARY,
+        formatter_class=_HelpFormatter,
         description=(
-            f"{SPEC_GET_SUMMARY}. URL downloads use a private 15-minute disk cache."
+            f"{SPEC_GET_SUMMARY}. Return {{value, line_start, line_end}}. "
+            "The line fields are zero-based source positions (null when "
+            "unavailable). Resolve local #/... $ref values by default; external "
+            "references cannot be resolved."
+        ),
+        epilog=(
+            "examples:\n"
+            "  openapi-tools-cli get paths '/pet/{petId}' ./openapi.yaml\n"
+            "  openapi-tools-cli get schemas Pet ./openapi.yaml\n"
+            "  openapi-tools-cli get schemas Pet ./openapi.yaml --no-resolve-refs"
         ),
     )
-    get_parser.add_argument("section", help="section containing the item")
-    get_parser.add_argument("name", help="item name within the section")
+    get_parser.add_argument(
+        "section", help=f"section containing the item: {_GET_SECTIONS}"
+    )
+    get_parser.add_argument(
+        "name", help="exact path (for example: /pet/{petId}) or component name (Pet)"
+    )
     _add_source_arguments(get_parser)
     get_parser.add_argument(
         "--no-resolve-refs",
         dest="resolve_refs",
         action="store_false",
-        help="preserve local $ref values instead of resolving them",
+        help="preserve all $ref values, including external references",
     )
     get_parser.set_defaults(resolve_refs=True)
+    parser.command_parsers = (info_parser, list_parser, get_parser)
+    examples = "\n\n".join(
+        command.epilog.removeprefix("examples:\n") for command in parser.command_parsers
+    )
+    parser.epilog = (
+        "examples:\n"
+        f"{examples}\n\n"
+        "  openapi-tools-cli info https://example.com/openapi.yaml \\\n"
+        '    -H "Authorization: Bearer $TOKEN"'
+    )
     return parser
 
 
